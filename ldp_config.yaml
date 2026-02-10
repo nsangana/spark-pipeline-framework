@@ -1,0 +1,10 @@
+ldp:
+  profile: spark-pipeline-testing
+  catalog: nsangana_catalog
+  schema: spark_pipeline_test
+  workspace_user: null
+  workspace_base_path: null
+  serverless: true
+  channel: CURRENT
+  edition: ADVANCED
+  development: true
