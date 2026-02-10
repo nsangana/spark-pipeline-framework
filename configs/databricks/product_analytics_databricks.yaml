@@ -1,0 +1,95 @@
+pipeline:
+  name: "databricks_product_analytics"
+  description: "Product performance analytics on Databricks"
+
+sources:
+  - name: "events"
+    type: "delta"
+    path: "/Volumes/nsangana_catalog/spark_pipeline_test/databricks_unit_test/user_events"
+
+  - name: "products"
+    type: "delta"
+    path: "/Volumes/nsangana_catalog/spark_pipeline_test/databricks_unit_test/products"
+
+  - name: "transactions"
+    type: "delta"
+    path: "/Volumes/nsangana_catalog/spark_pipeline_test/databricks_unit_test/transactions"
+
+transformations:
+  - name: "calculate_product_metrics"
+    type: "sql"
+    inputs: ["events", "products"]
+    output: "product_metrics"
+    sql: |
+      SELECT
+        p.product_id,
+        p.product_name,
+        p.category,
+        p.price,
+        COUNT(DISTINCT e.user_id) as unique_viewers,
+        COUNT(CASE WHEN e.event_type = 'click' THEN 1 END) as clicks,
+        COUNT(CASE WHEN e.event_type = 'add_to_cart' THEN 1 END) as add_to_carts,
+        COUNT(CASE WHEN e.event_type = 'purchase' THEN 1 END) as purchases_from_events
+      FROM products p
+      LEFT JOIN events e ON p.product_id = e.product_id
+      GROUP BY p.product_id, p.product_name, p.category, p.price
+
+  - name: "add_transaction_data"
+    type: "sql"
+    inputs: ["product_metrics", "transactions"]
+    output: "enriched_product_metrics"
+    sql: |
+      SELECT
+        pm.*,
+        COALESCE(t.total_quantity, 0) as total_quantity_sold,
+        COALESCE(t.total_revenue, 0) as total_revenue,
+        COALESCE(t.transaction_count, 0) as transaction_count
+      FROM product_metrics pm
+      LEFT JOIN (
+        SELECT
+          product_id,
+          SUM(quantity) as total_quantity,
+          SUM(total_amount) as total_revenue,
+          COUNT(*) as transaction_count
+        FROM transactions
+        WHERE status = 'completed'
+        GROUP BY product_id
+      ) t ON pm.product_id = t.product_id
+
+  - name: "calculate_conversion_rates"
+    type: "sql"
+    inputs: ["enriched_product_metrics"]
+    output: "final_product_metrics"
+    sql: |
+      SELECT
+        *,
+        CASE WHEN clicks > 0 THEN ROUND(add_to_carts * 100.0 / clicks, 2) ELSE 0 END as click_to_cart_rate,
+        CASE WHEN add_to_carts > 0 THEN ROUND(transaction_count * 100.0 / add_to_carts, 2) ELSE 0 END as cart_to_purchase_rate,
+        CASE WHEN total_quantity_sold > 0 THEN ROUND(total_revenue / total_quantity_sold, 2) ELSE 0 END as avg_revenue_per_unit
+      FROM enriched_product_metrics
+
+validation:
+  enabled: true
+  fail_on_error: true
+  rules:
+    - name: "check_product_id_not_null"
+      type: "null_check"
+      column: "product_id"
+      threshold: 0.0
+
+    - name: "check_positive_price"
+      type: "range_check"
+      column: "price"
+      min_value: 0
+
+    - name: "check_minimum_records"
+      type: "row_count"
+      min_count: 1
+
+target:
+  type: "delta"
+  path: "nsangana_catalog.spark_pipeline_test.product_performance_metrics"
+  mode: "overwrite"
+  optimize:
+    enabled: true
+    zorder_by: ["product_id"]

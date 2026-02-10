@@ -1,0 +1,101 @@
+pipeline:
+  name: "databricks_user_analytics"
+  description: "User engagement analytics pipeline on Databricks"
+
+sources:
+  - name: "events"
+    type: "delta"
+    path: "/Volumes/nsangana_catalog/spark_pipeline_test/databricks_unit_test/user_events"
+
+  - name: "user_profiles"
+    type: "delta"
+    path: "/Volumes/nsangana_catalog/spark_pipeline_test/databricks_unit_test/user_profiles"
+
+transformations:
+  - name: "calculate_daily_metrics"
+    type: "sql"
+    inputs: ["events"]
+    output: "daily_metrics"
+    sql: |
+      SELECT
+        user_id,
+        DATE(timestamp) as date,
+        COUNT(*) as total_events,
+        COUNT(DISTINCT event_type) as unique_event_types,
+        SUM(CASE WHEN event_type = 'page_view' THEN 1 ELSE 0 END) as page_views,
+        SUM(CASE WHEN event_type = 'click' THEN 1 ELSE 0 END) as clicks,
+        SUM(CASE WHEN event_type = 'purchase' THEN 1 ELSE 0 END) as purchases,
+        SUM(CASE WHEN event_type = 'purchase' THEN revenue ELSE 0 END) as total_revenue,
+        MIN(timestamp) as first_event_time,
+        MAX(timestamp) as last_event_time
+      FROM events
+      GROUP BY user_id, DATE(timestamp)
+
+  - name: "calculate_session_duration"
+    type: "sql"
+    inputs: ["daily_metrics"]
+    output: "metrics_with_duration"
+    sql: |
+      SELECT
+        *,
+        (UNIX_TIMESTAMP(last_event_time) - UNIX_TIMESTAMP(first_event_time)) / 60 as session_duration_minutes
+      FROM daily_metrics
+
+  - name: "enrich_with_profiles"
+    type: "sql"
+    inputs: ["metrics_with_duration", "user_profiles"]
+    output: "enriched_metrics"
+    sql: |
+      SELECT
+        m.*,
+        p.name,
+        p.email,
+        p.segment,
+        p.country,
+        p.signup_date,
+        DATEDIFF(m.date, p.signup_date) as days_since_signup
+      FROM metrics_with_duration m
+      LEFT JOIN user_profiles p ON m.user_id = p.user_id
+
+  - name: "calculate_engagement_score"
+    type: "sql"
+    inputs: ["enriched_metrics"]
+    output: "final_metrics"
+    sql: |
+      SELECT
+        *,
+        (page_views * 1 + clicks * 2 + purchases * 10) as engagement_score
+      FROM enriched_metrics
+
+validation:
+  enabled: true
+  fail_on_error: true
+  rules:
+    - name: "check_user_id_not_null"
+      type: "null_check"
+      column: "user_id"
+      threshold: 0.0
+
+    - name: "check_positive_events"
+      type: "range_check"
+      column: "total_events"
+      min_value: 1
+
+    - name: "check_engagement_score_range"
+      type: "range_check"
+      column: "engagement_score"
+      min_value: 0
+      max_value: 100000
+
+    - name: "check_minimum_records"
+      type: "row_count"
+      min_count: 1
+
+target:
+  type: "delta"
+  path: "nsangana_catalog.spark_pipeline_test.user_daily_metrics"
+  mode: "overwrite"
+  partition_by: ["date"]
+  optimize:
+    enabled: true
+    zorder_by: ["user_id"]

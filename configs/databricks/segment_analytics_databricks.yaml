@@ -1,0 +1,122 @@
+pipeline:
+  name: "databricks_segment_analytics"
+  description: "User segment performance analytics on Databricks"
+
+sources:
+  - name: "user_profiles"
+    type: "delta"
+    path: "/Volumes/nsangana_catalog/spark_pipeline_test/databricks_unit_test/user_profiles"
+
+  - name: "transactions"
+    type: "delta"
+    path: "/Volumes/nsangana_catalog/spark_pipeline_test/databricks_unit_test/transactions"
+
+  - name: "events"
+    type: "delta"
+    path: "/Volumes/nsangana_catalog/spark_pipeline_test/databricks_unit_test/user_events"
+
+transformations:
+  - name: "aggregate_user_activity"
+    type: "sql"
+    inputs: ["events"]
+    output: "user_activity"
+    sql: |
+      SELECT
+        user_id,
+        COUNT(*) as total_events,
+        COUNT(DISTINCT DATE(timestamp)) as active_days,
+        SUM(CASE WHEN event_type = 'purchase' THEN 1 ELSE 0 END) as purchase_count,
+        SUM(CASE WHEN event_type = 'purchase' THEN revenue ELSE 0 END) as total_spent
+      FROM events
+      GROUP BY user_id
+
+  - name: "aggregate_transactions"
+    type: "sql"
+    inputs: ["transactions"]
+    output: "user_transactions"
+    sql: |
+      SELECT
+        user_id,
+        COUNT(*) as transaction_count,
+        SUM(total_amount) as transaction_revenue,
+        AVG(total_amount) as avg_transaction_value
+      FROM transactions
+      WHERE status = 'completed'
+      GROUP BY user_id
+
+  - name: "combine_user_data"
+    type: "sql"
+    inputs: ["user_profiles", "user_activity", "user_transactions"]
+    output: "user_combined"
+    sql: |
+      SELECT
+        p.user_id,
+        p.name,
+        p.segment,
+        p.country,
+        p.age,
+        COALESCE(a.total_events, 0) as total_events,
+        COALESCE(a.active_days, 0) as active_days,
+        COALESCE(a.purchase_count, 0) as purchase_count,
+        COALESCE(a.total_spent, 0) as total_spent_events,
+        COALESCE(t.transaction_count, 0) as transaction_count,
+        COALESCE(t.transaction_revenue, 0) as transaction_revenue,
+        COALESCE(t.avg_transaction_value, 0) as avg_transaction_value
+      FROM user_profiles p
+      LEFT JOIN user_activity a ON p.user_id = a.user_id
+      LEFT JOIN user_transactions t ON p.user_id = t.user_id
+
+  - name: "aggregate_by_segment"
+    type: "sql"
+    inputs: ["user_combined"]
+    output: "segment_metrics"
+    sql: |
+      SELECT
+        segment,
+        COUNT(DISTINCT user_id) as total_users,
+        SUM(total_events) as total_events,
+        AVG(total_events) as avg_events_per_user,
+        SUM(active_days) as total_active_days,
+        AVG(active_days) as avg_active_days_per_user,
+        SUM(purchase_count) as total_purchases,
+        AVG(purchase_count) as avg_purchases_per_user,
+        SUM(transaction_revenue) as total_revenue,
+        AVG(transaction_revenue) as avg_revenue_per_user,
+        AVG(avg_transaction_value) as avg_transaction_value
+      FROM user_combined
+      GROUP BY segment
+
+  - name: "calculate_segment_scores"
+    type: "sql"
+    inputs: ["segment_metrics"]
+    output: "final_segment_metrics"
+    sql: |
+      SELECT
+        *,
+        ROUND(avg_events_per_user * 0.3 + avg_purchases_per_user * 0.4 + avg_revenue_per_user * 0.3 / 100, 2) as engagement_score
+      FROM segment_metrics
+
+validation:
+  enabled: true
+  fail_on_error: true
+  rules:
+    - name: "check_segment_not_null"
+      type: "null_check"
+      column: "segment"
+      threshold: 0.0
+
+    - name: "check_positive_users"
+      type: "range_check"
+      column: "total_users"
+      min_value: 1
+
+    - name: "check_minimum_records"
+      type: "row_count"
+      min_count: 1
+
+target:
+  type: "delta"
+  path: "nsangana_catalog.spark_pipeline_test.segment_performance_metrics"
+  mode: "overwrite"
+  optimize:
+    enabled: true

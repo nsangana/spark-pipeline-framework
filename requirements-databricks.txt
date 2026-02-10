@@ -1,0 +1,13 @@
+# Requirements for Databricks Connect deployment
+# Use this instead of requirements.txt when deploying to Databricks
+
+# Databricks Connect (includes PySpark)
+databricks-connect>=16.0.0
+
+# Delta Lake is included with Databricks Connect
+# No need for separate delta-spark package
+
+# Configuration and validation
+pyyaml>=6.0
+jsonschema>=4.17.0
+python-dotenv>=1.0.0

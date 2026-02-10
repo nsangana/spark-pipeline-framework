@@ -1,0 +1,239 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Pipeline Configuration Schema",
+  "description": "Schema for validating Spark pipeline YAML configurations",
+  "type": "object",
+  "required": ["pipeline", "sources", "target"],
+  "properties": {
+    "pipeline": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique name for the pipeline"
+        },
+        "description": {
+          "type": "string",
+          "description": "Optional description of the pipeline"
+        }
+      }
+    },
+    "spark": {
+      "type": "object",
+      "properties": {
+        "app_name": {
+          "type": "string",
+          "description": "Spark application name"
+        },
+        "master": {
+          "type": "string",
+          "description": "Spark master URL"
+        },
+        "config": {
+          "type": "object",
+          "description": "Additional Spark configuration options",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "type", "path"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Unique name for the data source"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["parquet", "delta", "csv", "json"],
+            "description": "Type of data source"
+          },
+          "path": {
+            "type": "string",
+            "description": "Path to the data source"
+          },
+          "options": {
+            "type": "object",
+            "description": "Additional read options",
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    "transformations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "type", "inputs", "output"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Unique name for the transformation"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["sql", "python", "join", "filter", "aggregate"],
+            "description": "Type of transformation"
+          },
+          "inputs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "List of input dataframe names"
+          },
+          "output": {
+            "type": "string",
+            "description": "Name for the output dataframe"
+          },
+          "sql": {
+            "type": "string",
+            "description": "SQL query (for sql type)"
+          },
+          "function": {
+            "type": "string",
+            "description": "Python function path (for python type)"
+          },
+          "params": {
+            "type": "object",
+            "description": "Parameters for the transformation",
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    "validation": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether validation is enabled",
+          "default": true
+        },
+        "fail_on_error": {
+          "type": "boolean",
+          "description": "Whether to fail pipeline on validation errors",
+          "default": true
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "type"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Name of the validation rule"
+              },
+              "type": {
+                "type": "string",
+                "description": "Type of validation rule"
+              },
+              "column": {
+                "type": "string",
+                "description": "Column to validate"
+              },
+              "threshold": {
+                "type": "number",
+                "description": "Threshold for validation"
+              },
+              "min_value": {
+                "type": "number",
+                "description": "Minimum value for range check"
+              },
+              "max_value": {
+                "type": "number",
+                "description": "Maximum value for range check"
+              },
+              "min_count": {
+                "type": "integer",
+                "description": "Minimum row count"
+              },
+              "max_count": {
+                "type": "integer",
+                "description": "Maximum row count"
+              }
+            }
+          }
+        },
+        "pytest_tests": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "List of pytest test paths to run"
+        }
+      }
+    },
+    "target": {
+      "type": "object",
+      "required": ["type", "path"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["delta", "parquet"],
+          "description": "Type of target storage"
+        },
+        "path": {
+          "type": "string",
+          "description": "Path where data will be written"
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["append", "overwrite", "merge"],
+          "description": "Write mode",
+          "default": "append"
+        },
+        "partition_by": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Columns to partition by"
+        },
+        "merge_keys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Columns to use for merge (required for merge mode)"
+        },
+        "optimize": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "zorder_by": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "vacuum": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "retention_hours": {
+              "type": "integer",
+              "default": 168
+            }
+          }
+        }
+      }
+    }
+  }
+}

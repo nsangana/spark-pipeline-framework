@@ -1,0 +1,77 @@
+pipeline:
+  name: "user_analytics"
+  description: "Daily user engagement analytics pipeline"
+
+spark:
+  app_name: "User Analytics Pipeline"
+  master: "local[*]"
+  config:
+    spark.sql.extensions: "io.delta.sql.DeltaSparkSessionExtension"
+    spark.sql.catalog.spark_catalog: "org.apache.spark.sql.delta.catalog.DeltaCatalog"
+    spark.sql.shuffle.partitions: "4"
+
+sources:
+  - name: "events"
+    type: "parquet"
+    path: "${DATA_PATH}/events"
+
+  - name: "user_profiles"
+    type: "parquet"
+    path: "${DATA_PATH}/user_profiles"
+
+transformations:
+  - name: "calculate_daily_metrics"
+    type: "python"
+    inputs: ["events"]
+    output: "daily_metrics"
+    function: "transformations.user_analytics.calculate_daily_metrics"
+
+  - name: "enrich_with_profiles"
+    type: "python"
+    inputs: ["daily_metrics", "user_profiles"]
+    output: "enriched_metrics"
+    function: "transformations.user_analytics.enrich_with_profiles"
+
+  - name: "filter_active_users"
+    type: "python"
+    inputs: ["enriched_metrics"]
+    output: "active_users"
+    function: "transformations.user_analytics.filter_active_users"
+    params:
+      min_events: 3
+
+validation:
+  enabled: true
+  fail_on_error: true
+  rules:
+    - name: "check_user_id_not_null"
+      type: "null_check"
+      column: "user_id"
+      threshold: 0.0
+
+    - name: "check_total_events_positive"
+      type: "range_check"
+      column: "total_events"
+      min_value: 1
+
+    - name: "check_engagement_score_range"
+      type: "range_check"
+      column: "engagement_score"
+      min_value: 0
+      max_value: 10000
+
+    - name: "check_minimum_records"
+      type: "row_count"
+      min_count: 1
+
+target:
+  type: "delta"
+  path: "${OUTPUT_PATH}/user_daily_metrics"
+  mode: "overwrite"
+  partition_by: ["date"]
+  optimize:
+    enabled: true
+    zorder_by: ["user_id"]
+  vacuum:
+    enabled: false
+    retention_hours: 168
